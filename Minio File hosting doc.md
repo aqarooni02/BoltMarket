@@ -11,7 +11,7 @@ It uses **self-hosted MinIO** (S3-compatible storage) to store seller uploads se
 ## 🚀 Architecture
 
 ```
-Nuxt 3 App (frontend + server API)
+Nuxt 4 App (frontend + server API)
         │
         ├─ Upload route (/api/upload)
         │     ↳ Stores file in MinIO <seller-bucket>-quarantine
