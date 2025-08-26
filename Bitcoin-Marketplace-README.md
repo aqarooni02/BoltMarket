@@ -140,3 +140,259 @@ npm run dev
 - Marketplace-hosted files for free sellers simplifies trust and storage  
 - Secure delivery via temporary tokens ensures paid access  
 - All items are sold for 10k sats
+
+---
+
+## BTCPay Integration Reference
+
+This section documents how the app integrates with BTCPay Server to create invoices, verify webhooks, and issue secure download tokens after payment. Keep your real credentials in `.env`.
+
+### Environment variables (.env)
+
+```dotenv
+# BTCPay Server
+BTCPAY_URL="https://your-btcpay.example.com"
+BTCPAY_API_KEY="your_btcpay_api_key"
+BTCPAY_STORE_ID="your_store_id"
+BTCPAY_WEBHOOK_SECRET="your_webhook_secret"
+
+# Files
+UPLOAD_PATH="/home/marketplace/uploads"
+TOKEN_EXPIRY=3600
+```
+
+### Server utility: `server/utils/btcpay.ts`
+
+```ts
+import crypto from 'node:crypto'
+
+type CreateInvoiceInput = {
+  amountSats: number
+  orderId: string
+  productId: string
+  buyerEmail?: string
+  redirectURL?: string
+}
+
+type CreateInvoiceResult = {
+  id: string
+  checkoutLink: string
+}
+
+const baseUrl = process.env.BTCPAY_URL!
+const apiKey = process.env.BTCPAY_API_KEY!
+const storeId = process.env.BTCPAY_STORE_ID!
+
+function satsToBtc(sats: number) {
+  return (sats / 1e8).toFixed(8)
+}
+
+export async function createInvoice(input: CreateInvoiceInput): Promise<CreateInvoiceResult> {
+  if (!baseUrl || !apiKey || !storeId) {
+    throw new Error('BTCPAY_URL, BTCPAY_API_KEY, BTCPAY_STORE_ID must be set')
+  }
+
+  const url = `${baseUrl}/api/v1/stores/${storeId}/invoices`
+  const body = {
+    amount: Number(satsToBtc(input.amountSats)),
+    currency: 'BTC',
+    metadata: {
+      orderId: input.orderId,
+      productId: input.productId,
+      buyerEmail: input.buyerEmail ?? null
+    },
+    checkout: input.redirectURL
+      ? { redirectURL: input.redirectURL, redirectAutomatically: true }
+      : undefined
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `token ${apiKey}`
+    },
+    body: JSON.stringify(body)
+  })
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => '')
+    throw new Error(`BTCPay create invoice failed: ${res.status} ${res.statusText} ${err}`)
+  }
+
+  const data = await res.json()
+  return { id: data.id, checkoutLink: data.checkoutLink }
+}
+
+// Verify BTCPay webhook signature (header "BTCPay-Sig": sha256=<hex>)
+export function verifyWebhookSignature(rawBody: string, sigHeader?: string | null) {
+  const secret = process.env.BTCPAY_WEBHOOK_SECRET
+  if (!secret) return false
+  if (!sigHeader) return false
+
+  const presented = sigHeader.replace(/^sha256=/i, '').trim()
+  const hmac = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
+  return crypto.timingSafeEqual(Buffer.from(presented), Buffer.from(hmac))
+}
+```
+
+### Create invoice endpoint: `server/api/payments/btcpay.post.ts`
+
+```ts
+export default defineEventHandler(async (event) => {
+  const body = await readBody<{ productId: string; amountSats?: number; orderId?: string; buyerEmail?: string }>(event)
+  if (!body?.productId) {
+    throw createError({ statusCode: 400, statusMessage: 'productId required' })
+  }
+
+  // In production, fetch price from DB using productId
+  const amountSats = body.amountSats ?? 10_000
+  const orderId = body.orderId ?? `ord_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+  const origin = getRequestHeader(event, 'origin') || `${getRequestProtocol(event)}://${getRequestHost(event)}`
+  const redirectURL = `${origin}/products/${body.productId}?paid=1`
+
+  const { createInvoice } = await import('~/server/utils/btcpay')
+  const invoice = await createInvoice({
+    amountSats,
+    orderId,
+    productId: body.productId,
+    buyerEmail: body.buyerEmail,
+    redirectURL
+  })
+
+  // Persist a pending order with invoice.id (DB)
+  return {
+    invoiceId: invoice.id,
+    checkoutUrl: invoice.checkoutLink,
+    status: 'new',
+    orderId
+  }
+})
+```
+
+### Webhook endpoint: `server/api/webhooks/btcpay.post.ts`
+
+```ts
+export default defineEventHandler(async (event) => {
+  const sig = getHeader(event, 'btcpay-sig') || getHeader(event, 'BTCPay-Sig') || getHeader(event, 'btcpay-signature') || null
+  const raw = (await readRawBody(event, 'utf8')) || ''
+  const { verifyWebhookSignature } = await import('~/server/utils/btcpay')
+
+  if (!verifyWebhookSignature(raw, sig)) {
+    throw createError({ statusCode: 401, statusMessage: 'invalid signature' })
+  }
+
+  const payload = JSON.parse(raw)
+  const type = payload?.type || payload?.event || ''
+  const data = payload?.data || payload
+
+  const invoiceId: string | undefined = data?.id || data?.invoiceId
+  const status: string | undefined = data?.status || data?.invoiceStatus
+  const orderId: string | undefined = data?.metadata?.orderId || data?.orderId
+  const productId: string | undefined = data?.metadata?.productId || data?.productId
+
+  const settled = type === 'InvoiceSettled' || status?.toLowerCase() === 'settled' || status?.toLowerCase() === 'paid'
+
+  if (settled && orderId && productId) {
+    const { issueDownloadToken } = await import('~/server/utils/downloadTokens')
+    const token = await issueDownloadToken({ orderId, productId })
+    // Mark order as paid and attach token (DB)
+  }
+
+  return { ok: true }
+})
+```
+
+### Download token utility: `server/utils/downloadTokens.ts`
+
+```ts
+import crypto from 'node:crypto'
+
+type IssueTokenInput = {
+  orderId: string
+  productId: string
+  filePath?: string
+}
+
+export type DownloadToken = {
+  token: string
+  filePath: string
+  expiresAt: Date
+  used: boolean
+  orderId: string
+  productId: string
+}
+
+export async function issueDownloadToken(input: IssueTokenInput): Promise<DownloadToken> {
+  const ttlSec = Number(process.env.TOKEN_EXPIRY ?? 3600)
+  const token = crypto.randomBytes(24).toString('hex')
+  const filePath = input.filePath ?? `/secure/path/for/${input.productId}`
+
+  const record: DownloadToken = {
+    token,
+    filePath,
+    expiresAt: new Date(Date.now() + ttlSec * 1000),
+    used: false,
+    orderId: input.orderId,
+    productId: input.productId
+  }
+
+  // Persist token to DB in production
+  return record
+}
+```
+
+### Seller upload endpoint (secure): `server/api/seller/upload.post.ts`
+
+```ts
+import { promises as fsp } from 'node:fs'
+import path from 'node:path'
+
+export default defineEventHandler(async (event) => {
+  const form = await readMultipartFormData(event)
+  if (!form) throw createError({ statusCode: 400, statusMessage: 'multipart form-data required' })
+
+  let filePart: any
+  let productId = ''
+  let sellerId = ''
+  for (const p of form) {
+    if (p.name === 'file') filePart = p
+    if (p.name === 'productId' && typeof p.data === 'string') productId = p.data
+    if (p.name === 'sellerId' && typeof p.data === 'string') sellerId = p.data
+  }
+
+  if (!filePart || !productId || !sellerId) {
+    throw createError({ statusCode: 400, statusMessage: 'file, productId, sellerId required' })
+  }
+
+  const base = process.env.UPLOAD_PATH
+  if (!base) throw createError({ statusCode: 500, statusMessage: 'UPLOAD_PATH not set' })
+
+  const dir = path.resolve(base, sellerId, productId)
+  await fsp.mkdir(dir, { recursive: true })
+  const dest = path.resolve(dir, filePart.filename)
+
+  await fsp.writeFile(dest, filePart.data)
+
+  // Save file path for product in DB in production
+  return { ok: true, path: dest }
+})
+```
+
+### Frontend usage (create invoice and redirect)
+
+```ts
+const { generateInvoice } = useApi()
+const buy = async () => {
+  const res = await generateInvoice(productId)
+  window.location.href = res.checkoutUrl
+}
+```
+
+### Configure BTCPay webhook
+
+- Create a webhook in your BTCPay Store to `https://your-app.example.com/api/webhooks/btcpay`.
+- Set the secret to the same value as `BTCPAY_WEBHOOK_SECRET`.
+- Ensure events for invoice payments are enabled (e.g., InvoiceSettled).
+- The webhook will verify HMAC and issue a download token on payment.
