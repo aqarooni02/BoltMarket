@@ -5,6 +5,7 @@ export default defineNuxtConfig({
   modules: [
     '@nuxt/ui',
     '@nuxt/icon',
+    '@nuxtus/nuxt-localtunnel'
   ],
   runtimeConfig: {
     btcpayApiKey: process.env.BTCPAY_API_KEY,
@@ -13,5 +14,6 @@ export default defineNuxtConfig({
     tokenExpiry: process.env.TOKEN_EXPIRY ? Number(process.env.TOKEN_EXPIRY) : 3600,
     public: {}
   },
-  css: ['~/assets/main.css']
+  css: ['~/assets/main.css'],
+
 })

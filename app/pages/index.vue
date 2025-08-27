@@ -16,8 +16,8 @@ const features = [
       <h1 class="text-5xl font-extrabold tracking-tight">BoltMarket</h1>
       <p class="text-lg text-neutral-600 dark:text-neutral-400 max-w-2xl mx-auto">Lightning-fast marketplace for digital goods. Pay with sats, receive secure one-time downloads.</p>
       <div class="flex items-center justify-center gap-3">
-        <UButton color="primary" size="lg" to="/products" class="px-6">Browse Products</UButton>
-        <UButton variant="outline" size="lg" color="neutral" to="/seller" class="px-6">Start Selling</UButton>
+        <UButton color="primary" size="lg" to="/products/1" class="px-6">View Test Product</UButton>
+        <UButton variant="outline" size="lg" color="neutral" to="/products" class="px-6">Browse Products</UButton>
       </div>
     </div>
   </section>

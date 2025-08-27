@@ -10,7 +10,9 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
+    "@nuxtus/nuxt-localtunnel": "^1.0.1",
     "eslint": "^9.34.0",
+    "npm": "^11.5.2",
     "nuxt": "^4.0.3",
     "vue": "^3.5.20",
     "vue-router": "^4.5.1"

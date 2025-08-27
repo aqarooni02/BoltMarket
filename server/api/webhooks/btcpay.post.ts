@@ -1,9 +1,27 @@
 export default defineEventHandler(async (event) => {
-  // TODO: Verify BTCPay webhook signature and status
-  const payload = await readBody<any>(event)
+  const sig =
+    getRequestHeader(event, 'btcpay-sig') ||
+    getRequestHeader(event, 'BTCPay-Sig') ||
+    getRequestHeader(event, 'btcpay-signature') ||
+    null
 
-  // Placeholder: return ok to BTCPay
-  return { ok: true, received: !!payload }
+  const raw = (await readRawBody(event, 'utf8')) || ''
+  const { verifyWebhookSignature } = await import('../../utils/btcpay')
+
+  if (!verifyWebhookSignature(String(raw), sig)) {
+    throw createError({ statusCode: 401, statusMessage: 'invalid signature' })
+  }
+
+  let payload: any = {}
+  try {
+    payload = raw ? JSON.parse(String(raw)) : {}
+  } catch {
+    // ignore, payload stays empty
+  }
+
+  // Minimal handling (no DB): acknowledge only
+  // You can extend here to issue a download token, etc.
+  return { ok: true }
 })
 
 

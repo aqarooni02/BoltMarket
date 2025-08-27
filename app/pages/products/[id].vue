@@ -1,5 +1,8 @@
 <script setup lang="ts">
 const route = useRoute()
+const router = useRouter()
+const { generateInvoice } = useApi()
+
 const product = computed(() => ({
   id: String(route.params.id || ''),
   title: 'Sample Product',
@@ -7,7 +10,25 @@ const product = computed(() => ({
   description: 'Digital product description placeholder.'
 }))
 
-const isOpen = ref(false)
+const loading = ref(false)
+const errorMsg = ref('')
+
+async function buy() {
+  try {
+    loading.value = true
+    errorMsg.value = ''
+    const res = await generateInvoice(product.value.id)
+    if (res?.checkoutUrl) {
+      window.location.href = res.checkoutUrl
+    } else {
+      throw new Error('No checkout URL returned')
+    }
+  } catch (err: any) {
+    errorMsg.value = err?.message || 'Failed to create invoice'
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -17,26 +38,12 @@ const isOpen = ref(false)
       <UBadge color="warning" variant="subtle">{{ product.price.toLocaleString() }} sats</UBadge>
     </div>
     <p class="text-gray-600">{{ product.description }}</p>
-    <UButton color="primary" @click="isOpen = true">Buy for 10,000 sats</UButton>
-
-    <UModal v-model="isOpen">
-      <UCard>
-        <template #header>
-          <div class="font-medium">Confirm Purchase</div>
-        </template>
-        <div class="space-y-3">
-          <p>Proceed to generate a Lightning invoice via BTCPay.</p>
-          <UAlert color="warning" title="Test Mode" description="This is a placeholder interaction." />
-        </div>
-        <template #footer>
-          <div class="flex justify-end gap-2">
-            <UButton variant="ghost" @click="isOpen = false">Cancel</UButton>
-            <UButton color="primary" @click="isOpen = false">Generate Invoice</UButton>
-          </div>
-        </template>
-      </UCard>
-    </UModal>
+    <div class="flex items-center gap-3">
+      <UButton :loading="loading" color="primary" @click="buy">Buy</UButton>
+      <span v-if="errorMsg" class="text-red-600 text-sm">{{ errorMsg }}</span>
+    </div>
   </div>
+  
 </template>
 
 
