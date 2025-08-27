@@ -57,6 +57,34 @@ A Bitcoin-only digital marketplace for digital goods. Buyers pay in Lightning or
 - Lightning payments verified via webhook  
 - Sellers only withdraw when minimum balance is met  
 
+## Configuration (.env)
+
+```env
+# BTCPay Server
+BTCPAY_URL=
+BTCPAY_API_KEY=
+BTCPAY_STORE_ID=
+BTCPAY_WEBHOOK_SECRET=
+
+# Storage (MVP: local filesystem)
+STORAGE_DRIVER=local
+UPLOAD_PATH=./uploads
+
+# Download tokens
+TOKEN_EXPIRY=3600
+DOWNLOAD_MAX_ATTEMPTS=1
+
+# Marketplace
+MARKETPLACE_FEE_PERCENT=5
+MIN_WITHDRAW_SATS=50000
+
+# Optional: MinIO (for upgrade path)
+# MINIO_ENDPOINT=
+# MINIO_KEY=
+# MINIO_SECRET=
+# MINIO_REGION=us-east-1
+```
+
 ## Upgrade Path
 - Paid seller plans: multiple products, larger files  
 - Seller-hosted files (S3 presigned URLs)  

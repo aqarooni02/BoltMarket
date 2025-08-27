@@ -10,7 +10,7 @@ A lightweight marketplace for digital products where buyers pay in Bitcoin (sats
 **Frontend / Backend:** Nuxt 4 (server routes for API)  
 **Database:** SQLite/PostgreSQL via Prisma ORM  
 **Payment Processor:** BTCPay Server (Lightning invoices)  
-**File Storage:** Marketplace-hosted for free plan; seller-hosted optional for upgrades  
+**File Storage:** Marketplace-hosted (local filesystem for MVP); seller-hosted via S3-compatible storage as upgrade  
 **Delivery System:** Temporary download links (time-limited, one-time access)
 
 ---
@@ -41,10 +41,11 @@ A lightweight marketplace for digital products where buyers pay in Bitcoin (sats
 
 | Table | Fields |
 |-------|--------|
-| sellers | id, username, wallet_address, plan_type |
+| sellers | id, username, email, wallet_address, plan_type, balance_sats |
 | products | id, seller_id, title, description, sats_price, file_path |
-| orders | id, product_id, buyer_info, invoice_id, status |
-| download_tokens | token, file_path, expires_at, used |
+| orders | id, product_id, buyer_info, invoice_id, status, sats_paid, fee_sats |
+| download_tokens | token, order_id, product_id, file_path, expires_at, used |
+| withdrawals | id, seller_id, sats, status |
 
 ---
 
@@ -54,7 +55,7 @@ A lightweight marketplace for digital products where buyers pay in Bitcoin (sats
 2. Product goes live → visible in marketplace  
 3. Buyer clicks **Buy** → Lightning invoice is generated  
 4. Buyer pays → BTCPay webhook confirms payment  
-5. Marketplace generates **temporary download token**  
+5. Marketplace deducts marketplace fee, credits seller balance, and generates **temporary download token**  
 6. Buyer downloads file via `/download/{token}`  
 7. Token expires automatically (time-limited and/or one-time use)  
 
@@ -82,12 +83,30 @@ npm install
 ```
 
 3. Configure environment variables (`.env`):  
-```dotenv
-DATABASE_URL="postgresql://user:pass@localhost:5432/marketplace"
-BTCPAY_API_KEY="your_btcpay_api_key"
-BTCPAY_STORE_ID="your_store_id"
-UPLOAD_PATH="/home/marketplace/uploads"
-TOKEN_EXPIRY=3600 # in seconds
+```env
+# BTCPay Server
+BTCPAY_URL=
+BTCPAY_API_KEY=
+BTCPAY_STORE_ID=
+BTCPAY_WEBHOOK_SECRET=
+
+# Storage (MVP: local filesystem)
+STORAGE_DRIVER=local
+UPLOAD_PATH=./uploads
+
+# Download tokens
+TOKEN_EXPIRY=3600
+DOWNLOAD_MAX_ATTEMPTS=1
+
+# Marketplace
+MARKETPLACE_FEE_PERCENT=5
+MIN_WITHDRAW_SATS=50000
+
+# Optional: MinIO (for upgrade path)
+# MINIO_ENDPOINT=
+# MINIO_KEY=
+# MINIO_SECRET=
+# MINIO_REGION=us-east-1
 ```
 
 4. Run database migrations (Prisma):  
@@ -100,7 +119,7 @@ npx prisma migrate dev --name init
 npm run dev
 ```
 
-6. Upload files in `/uploads/{seller_id}/{product_id}` for free plan products.
+6. Upload files are stored under `${UPLOAD_PATH}/{seller_id}/{product_id}` for free plan products.
 
 ---
 
@@ -108,7 +127,7 @@ npm run dev
 
 - Files stored privately, outside public web root  
 - Temporary download tokens expire (default: 1 hour)  
-- Tokens can be limited to one-time download  
+- Tokens are single-use with configurable max attempts  
 - Lightning payments verified via BTCPay webhook  
 
 ---
@@ -136,10 +155,10 @@ npm run dev
 
 ## 📝 Notes
 
-- MVP is **Bitcoin-only**: all prices in sats, Lightning network recommended  
+- MVP is **Bitcoin-only**: prices are in sats, Lightning network recommended  
 - Marketplace-hosted files for free sellers simplifies trust and storage  
 - Secure delivery via temporary tokens ensures paid access  
-- All items are sold for 10k sats
+- Product price is per-product; a default may be used if missing
 
 ---
 

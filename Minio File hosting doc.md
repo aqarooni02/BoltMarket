@@ -1,5 +1,5 @@
 
-# 📦 File Hosting with MinIO (Nuxt + BTCPayServer)
+# 📦 File Hosting with MinIO (Nuxt 4 + BTCPayServer)
 
 This service powers digital product delivery for the marketplace.  
 It uses **self-hosted MinIO** (S3-compatible storage) to store seller uploads securely and generate expiring download links for buyers.  
@@ -13,18 +13,17 @@ It uses **self-hosted MinIO** (S3-compatible storage) to store seller uploads se
 ```
 Nuxt 4 App (frontend + server API)
         │
-        ├─ Upload route (/api/upload)
-        │     ↳ Stores file in MinIO <seller-bucket>-quarantine
-        │     ↳ Runs validation + AV scanning
-        │     ↳ Moves clean files to <seller-bucket>-products
+        ├─ Upload route (/api/seller/upload)
+        │     ↳ Stores file (MVP: local ${UPLOAD_PATH}/{sellerId}/{productId})
+        │     ↳ (Upgrade) MinIO: <seller-bucket>-quarantine → validation → -products
         │
-        ├─ BTCPay Webhook (/api/payment/paid)
-        │     ↳ Confirms invoice
-        │     ↳ Issues signed URL for buyer
+        ├─ BTCPay Webhook (/api/webhooks/btcpay)
+        │     ↳ Verifies signature, confirms invoice
+        │     ↳ Deducts fee, credits seller balance, issues download token
         │
         └─ Download route (/api/download/:token)
               ↳ Validates token
-              ↳ Redirects to signed MinIO URL (1h expiry, limited attempts)
+              ↳ (Local) streams file / (MinIO) redirects to signed URL
 ```
 
 ---
@@ -32,7 +31,7 @@ Nuxt 4 App (frontend + server API)
 ## 🛡️ Protection Pipeline
 
 ### Upload Validation
-- **File size:** max 2 GB upload, max 5 GB uncompressed (Free Tier: 500 MB upload, 2 GB uncompressed).  
+- **File size (MVP defaults):** Free Tier: max 100 MB upload (configurable via `FILE_MAX_MB`).  
 - **Archive checks (ZIP)**:
   - Reject if encrypted/password-protected.  
   - Reject if path traversal (`../`, absolute paths).  
@@ -50,8 +49,8 @@ Nuxt 4 App (frontend + server API)
 - All objects private by default; only accessed via signed URLs.  
 
 ### Delivery
-- **Signed URLs:** 1-hour expiry, single use. (Free Tier: 30 min expiry, 1 download attempt)  
-- **Download limits:** 3 attempts per purchase.  
+- **Tokens:** default 1-hour expiry (`TOKEN_EXPIRY`), single-use with `DOWNLOAD_MAX_ATTEMPTS=1` (configurable).  
+- **Download limits:** configurable attempts per purchase.  
 - **Audit log:** IP, timestamp, user ID.  
 - (Optional) **Watermarking:** inject buyer info into LICENSE.txt before delivery.  
 
@@ -75,10 +74,10 @@ mc mb local/seller123-products
 
 ---
 
-## 📑 Nuxt 3 API Examples
+## 📑 Nuxt 4 API Examples
 
 ### 1. Upload (Seller)
-\`/server/api/upload.post.ts\`
+\`/server/api/seller/upload.post.ts\`
 
 ```ts
 import formidable from "formidable";
@@ -116,7 +115,7 @@ export default defineEventHandler(async (event) => {
 ---
 
 ### 2. Payment Webhook (BTCPay)
-\`/server/api/payment/paid.post.ts\`
+\`/server/api/webhooks/btcpay.post.ts\`
 
 ```ts
 import { S3Client, CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
@@ -177,16 +176,28 @@ export default defineEventHandler(async (event) => {
 
 ## 🔒 Environment Variables
 \`\`\`env
+# Optional MinIO (upgrade path)
 MINIO_KEY=admin
 MINIO_SECRET=secretpass
 MINIO_ENDPOINT=http://localhost:9000
+MINIO_REGION=us-east-1
+
+# MVP local storage
+STORAGE_DRIVER=local
+UPLOAD_PATH=./uploads
+
+# Tokens & policy
+TOKEN_EXPIRY=3600
+DOWNLOAD_MAX_ATTEMPTS=1
+MARKETPLACE_FEE_PERCENT=5
+MIN_WITHDRAW_SATS=50000
 \`\`\`
 
 ---
 
 ## ✅ Summary
-- **Buckets:** one per seller (`<seller-id>-quarantine`, `<seller-id>-products`).  
-- **Upload → quarantine bucket → validation → promote to products bucket**.  
-- **Protection:** file checks, antivirus, encryption, signed URLs, audit logging.  
-- **Delivery:** expiring download links after BTCPay payment confirmation.  
-- **Tiers:** Free sellers have lower limits, premium sellers can upgrade for larger file sizes and more download attempts.
+- **MVP:** Local filesystem under `${UPLOAD_PATH}`; MinIO as upgrade behind a driver.  
+- **MinIO path:** one bucket per seller (`<seller-id>-quarantine`, `<seller-id>-products`) when enabled.  
+- **Flow:** Upload → (optional) quarantine/validation → promote → issue download token after BTCPay payment.  
+- **Protection:** file checks, antivirus option, signed URLs or streaming, audit logging.  
+- **Tiers:** Free sellers have lower limits; premium sellers can upgrade for larger sizes and more attempts.

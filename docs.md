@@ -12,20 +12,24 @@ BTCPAY_WEBHOOK_SECRET="your_webhook_secret"
 # Database
 DATABASE_URL="postgresql://user:pass@localhost:5432/marketplace"
 
-# Files
-UPLOAD_PATH="/home/marketplace/uploads"
+# Storage (MVP: local filesystem)
+STORAGE_DRIVER=local
+UPLOAD_PATH="./uploads"
+
+# Download tokens
 TOKEN_EXPIRY=3600 # seconds
+DOWNLOAD_MAX_ATTEMPTS=1
 
 # Marketplace
-MIN_WITHDRAW_USD=10
 MARKETPLACE_FEE_PERCENT=5
+MIN_WITHDRAW_SATS=50000
 ```
 
 ## Server Utilities
 
 * **server/utils/btcpay.ts** → Create invoices, verify BTCPay webhook signatures
 * **server/utils/downloadTokens.ts** → Generate temporary download tokens
-* **server/utils/conversions.ts** → Convert USD → sats for minimum withdrawal
+* (optional later) **server/utils/conversions.ts** → Convert USD → sats for UI display
 
 ## API Endpoints
 
@@ -35,7 +39,7 @@ MARKETPLACE_FEE_PERCENT=5
 
 * Input: `{ productId, amountSats?, orderId?, buyerEmail? }`
 * Returns: `{ invoiceId, checkoutUrl, orderId }`
-* Creates Lightning invoice, persists pending order
+* Creates Lightning invoice, persists pending order (DB)
 
 ### Webhooks
 
@@ -43,23 +47,23 @@ MARKETPLACE_FEE_PERCENT=5
 
 * Verifies signature
 * Confirms invoice paid
-* Deduct 5% marketplace fee
-* Credit seller balance
-* Issues download token
+* Deduct `MARKETPLACE_FEE_PERCENT`
+* Credit seller `balance_sats`
+* Issue download token
 
 ### Seller Upload
 
 **POST /api/seller/upload**
 
 * Accepts multipart file upload
-* Stores files in `/uploads/{sellerId}/{productId}`
+* Stores files in `${UPLOAD_PATH}/{sellerId}/{productId}`
 * Saves file path in DB
 
 ### Withdrawals
 
 **POST /api/seller/withdraw**
 
-* Checks seller balance ≥ `MIN_WITHDRAW_USD`
+* Checks seller balance ≥ `MIN_WITHDRAW_SATS`
 * Sends funds to seller wallet
 * Updates balance and withdrawal record
 
