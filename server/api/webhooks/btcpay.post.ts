@@ -1,4 +1,5 @@
 export default defineEventHandler(async (event) => {
+  console.log('BTCPay webhook received')
   const sig =
     getRequestHeader(event, 'btcpay-sig') ||
     getRequestHeader(event, 'BTCPay-Sig') ||
@@ -18,7 +19,7 @@ export default defineEventHandler(async (event) => {
   } catch {
     // ignore, payload stays empty
   }
-
+  console.log(payload)
   // Minimal handling (no DB): acknowledge only
   // You can extend here to issue a download token, etc.
   return { ok: true }
